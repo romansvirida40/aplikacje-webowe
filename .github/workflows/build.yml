@@ -1,0 +1,51 @@
+name: Build Uluchshaizer
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            targets: Uluchshaizer_VST3 Uluchshaizer_Standalone UluchshaizerDspTest
+          - os: macos-latest
+            name: macOS
+            targets: Uluchshaizer_VST3 Uluchshaizer_AU Uluchshaizer_Standalone UluchshaizerDspTest
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4 --target ${{ matrix.targets }}
+
+      - name: Run DSP tests
+        shell: bash
+        run: |
+          mkdir -p test-out
+          if [ -f build/Release/UluchshaizerDspTest.exe ]; then build/Release/UluchshaizerDspTest.exe test-out; \
+          elif [ -f build/UluchshaizerDspTest ]; then build/UluchshaizerDspTest test-out; \
+          else find build -name "UluchshaizerDspTest*" -type f -perm -u+x -exec {} test-out \; ; fi
+
+      - name: Collect plugin
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -R build/Uluchshaizer_artefacts/Release/VST3/Uluchshaizer.vst3 dist/
+          if [ -d build/Uluchshaizer_artefacts/Release/AU ]; then cp -R build/Uluchshaizer_artefacts/Release/AU/Uluchshaizer.component dist/; fi
+          cp -R build/Uluchshaizer_artefacts/Release/Standalone/* dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Uluchshaizer-${{ matrix.name }}
+          path: dist
