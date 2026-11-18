@@ -23,29 +23,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Ищет CMakeLists.txt проекта Uluchshaizer в корне или в любой подпапке,
+      # поэтому не важно, куда именно загружены файлы.
+      - name: Locate project
+        shell: bash
+        run: |
+          SRC=""
+          for f in $(find . -name CMakeLists.txt -not -path "./build/*" -not -path "*/_deps/*" | sort); do
+            if grep -q "Uluchshaizer" "$f"; then SRC="$(dirname "$f")"; break; fi
+          done
+          if [ -z "$SRC" ]; then
+            echo "::error::CMakeLists.txt проекта Uluchshaizer не найден в репозитории. Загрузите папки Source, Resources, tests и файл CMakeLists.txt."
+            find . -maxdepth 3 -not -path "./.git/*" | head -100
+            exit 1
+          fi
+          echo "Project dir: $SRC"
+          echo "SRC_DIR=$SRC" >> "$GITHUB_ENV"
+
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: cmake -S "$SRC_DIR" -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
+        shell: bash
         run: cmake --build build --config Release --parallel 4 --target ${{ matrix.targets }}
 
       - name: Run DSP tests
         shell: bash
         run: |
           mkdir -p test-out
-          if [ -f build/Release/UluchshaizerDspTest.exe ]; then build/Release/UluchshaizerDspTest.exe test-out; \
-          elif [ -f build/UluchshaizerDspTest ]; then build/UluchshaizerDspTest test-out; \
-          else find build -name "UluchshaizerDspTest*" -type f -perm -u+x -exec {} test-out \; ; fi
+          T=$(find build -name "UluchshaizerDspTest*" -type f \( -name "*.exe" -o -perm -u+x \) | head -1)
+          if [ -z "$T" ]; then echo "DSP test binary not found"; exit 1; fi
+          "$T" test-out
 
       - name: Collect plugin
         shell: bash
         run: |
           mkdir -p dist
-          cp -R build/Uluchshaizer_artefacts/Release/VST3/Uluchshaizer.vst3 dist/
-          if [ -d build/Uluchshaizer_artefacts/Release/AU ]; then cp -R build/Uluchshaizer_artefacts/Release/AU/Uluchshaizer.component dist/; fi
-          cp -R build/Uluchshaizer_artefacts/Release/Standalone/* dist/
+          A=$(find build -type d -name "Uluchshaizer.vst3" | head -1)
+          if [ -z "$A" ]; then echo "VST3 not found"; find build -maxdepth 4 | head -80; exit 1; fi
+          cp -R "$A" dist/
+          C=$(find build -type d -name "Uluchshaizer.component" | head -1)
+          if [ -n "$C" ]; then cp -R "$C" dist/; fi
+          S=$(find build -path "*Standalone*" \( -name "Uluchshaizer.exe" -o -name "Uluchshaizer.app" \) | head -1)
+          if [ -n "$S" ]; then cp -R "$S" dist/; fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: Uluchshaizer-${{ matrix.name }}
           path: dist
+          
